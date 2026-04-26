@@ -43,6 +43,8 @@ def session_token(mongo_db):
     mongo_db.user_sessions.delete_one({"session_token": token})
     mongo_db.users.delete_one({"user_id": uid})
     mongo_db.businesses.delete_many({"user_id": uid})
+    mongo_db.inventory.delete_many({"user_id": uid})
+    mongo_db.snapshots.delete_many({"user_id": uid})
 
 
 @pytest.fixture
@@ -237,3 +239,127 @@ class TestLogout:
         r2 = requests.get(f"{BASE_URL}/api/auth/me", headers=h)
         assert r2.status_code == 401
         mongo_db.users.delete_one({"user_id": uid})
+
+
+
+# ========= INVENTORY (NEW) =========
+
+class TestInventory:
+    def test_inventory_no_auth(self):
+        r = requests.get(f"{BASE_URL}/api/inventory")
+        assert r.status_code == 401
+
+    def test_inventory_summary_after_sample(self, auth_headers):
+        requests.post(f"{BASE_URL}/api/business/sample", headers=auth_headers)
+        r = requests.get(f"{BASE_URL}/api/inventory", headers=auth_headers)
+        assert r.status_code == 200
+        d = r.json()
+        assert "items" in d and "summary" in d
+        s = d["summary"]
+        for k in ("count", "total_units", "total_cost_value", "total_retail_value",
+                  "potential_margin", "low_stock_count", "low_stock_items"):
+            assert k in s, f"summary missing key {k}"
+        assert s["count"] >= 5
+        assert s["total_units"] > 0
+        assert s["potential_margin"] == round(s["total_retail_value"] - s["total_cost_value"], 2)
+        assert s["low_stock_count"] >= 1
+
+    def test_inventory_create_update_delete(self, auth_headers):
+        payload = {
+            "name": "TEST_Producto", "sku": "TST-001", "category": "Test",
+            "stock": 25, "reorder_level": 5, "cost": 10.0, "price": 25.0,
+        }
+        r = requests.post(f"{BASE_URL}/api/inventory", json=payload, headers=auth_headers)
+        assert r.status_code == 200
+        item = r.json()
+        assert item["name"] == "TEST_Producto"
+        assert item["stock"] == 25
+        item_id = item["item_id"]
+
+        r2 = requests.get(f"{BASE_URL}/api/inventory", headers=auth_headers)
+        names = [i["name"] for i in r2.json()["items"]]
+        assert "TEST_Producto" in names
+
+        upd = {**payload, "stock": 100, "price": 30.0}
+        r3 = requests.put(f"{BASE_URL}/api/inventory/{item_id}", json=upd, headers=auth_headers)
+        assert r3.status_code == 200
+        assert r3.json()["stock"] == 100
+        assert r3.json()["price"] == 30.0
+
+        r4 = requests.get(f"{BASE_URL}/api/inventory", headers=auth_headers)
+        match = [i for i in r4.json()["items"] if i["item_id"] == item_id]
+        assert match and match[0]["stock"] == 100
+
+        r5 = requests.delete(f"{BASE_URL}/api/inventory/{item_id}", headers=auth_headers)
+        assert r5.status_code == 200
+
+        r6 = requests.get(f"{BASE_URL}/api/inventory", headers=auth_headers)
+        ids = [i["item_id"] for i in r6.json()["items"]]
+        assert item_id not in ids
+
+    def test_inventory_update_not_found(self, auth_headers):
+        upd = {"name": "X", "sku": "x", "category": "x",
+               "stock": 1, "reorder_level": 1, "cost": 1, "price": 1}
+        r = requests.put(f"{BASE_URL}/api/inventory/nonexistent_xyz",
+                         json=upd, headers=auth_headers)
+        assert r.status_code == 404
+
+    def test_inventory_delete_not_found(self, auth_headers):
+        r = requests.delete(f"{BASE_URL}/api/inventory/nonexistent_xyz",
+                            headers=auth_headers)
+        assert r.status_code == 404
+
+
+# ========= SNAPSHOTS (NEW) =========
+
+class TestSnapshots:
+    def test_snapshots_no_auth(self):
+        r = requests.get(f"{BASE_URL}/api/snapshots")
+        assert r.status_code == 401
+
+    def test_snapshots_after_sample(self, auth_headers):
+        requests.post(f"{BASE_URL}/api/business/sample", headers=auth_headers)
+        r = requests.get(f"{BASE_URL}/api/snapshots", headers=auth_headers)
+        assert r.status_code == 200
+        snaps = r.json()["snapshots"]
+        assert isinstance(snaps, list)
+        assert len(snaps) >= 3
+        periods = [s["period"] for s in snaps]
+        assert periods == sorted(periods)
+        for s in snaps:
+            for k in ("snapshot_id", "user_id", "period", "revenue", "profit", "margin"):
+                assert k in s
+
+    def test_snapshot_created_on_business_save(self, auth_headers):
+        payload = {
+            "business_name": "TEST_SnapBiz", "business_type": "tienda",
+            "monthly_sales": 50000, "fixed_costs": 10000, "cost_per_unit": 20,
+            "sale_price": 50, "quantity_sold": 500, "inventory": 200,
+        }
+        requests.post(f"{BASE_URL}/api/business", json=payload, headers=auth_headers)
+        r = requests.get(f"{BASE_URL}/api/snapshots", headers=auth_headers)
+        snaps = r.json()["snapshots"]
+        import datetime as _dt
+        cur_period = _dt.datetime.utcnow().strftime("%Y-%m")
+        assert any(s["period"] == cur_period for s in snaps)
+
+
+# ========= BENCHMARKS (NEW) =========
+
+class TestBenchmarks:
+    @pytest.mark.parametrize("btype", [
+        "tienda", "restaurante", "servicios", "manufactura",
+        "ecommerce", "salud", "educacion", "otro",
+    ])
+    def test_benchmark_known_types(self, btype):
+        r = requests.get(f"{BASE_URL}/api/benchmarks/{btype}")
+        assert r.status_code == 200
+        d = r.json()
+        assert "margin" in d and "label" in d and "inv_turnover" in d
+        assert isinstance(d["margin"], (int, float))
+        assert d["business_type"] == btype
+
+    def test_benchmark_unknown_falls_back(self):
+        r = requests.get(f"{BASE_URL}/api/benchmarks/unknownxyz")
+        assert r.status_code == 200
+        assert r.json()["label"] == "Otro"

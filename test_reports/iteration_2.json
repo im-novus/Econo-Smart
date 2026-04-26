@@ -1,0 +1,34 @@
+{
+  "summary": "Iteration 2 testing complete. Backend: 31/31 pytest tests passed (auth, business CRUD/KPIs/status/simulator/AI, plus NEW inventory CRUD with summary, snapshots history, benchmarks for all 8 business types incl. unknown fallback, snapshot-on-save). Frontend: DOM-error FIX VERIFIED — 0 removeChild/insertBefore errors during rapid simulator preset clicks (preset-price-up/cost-down/qty-up x4 cycles + run-simulation-btn) AND during edit-business -> back-to-dashboard re-render. Inventory page UI works end-to-end: navigate to /inventario, summary cards (sum-count/units/value/low) render, add product (add-inventory-btn -> dialog -> inv-name/sku/category/stock/reorder/cost/price -> inv-save-btn) works and item appears, search filters correctly, edit-{id} opens prefilled dialog and saves, delete-{id} -> confirm-delete-btn removes the item and toast shows. AppShell nav (nav-dashboard, nav-inventory, nav-business) navigates correctly. export-pdf-btn and goto-inventory-btn exist and click without crashing. ONE GAP: history-chart-card and benchmark-card data-testid attributes are NOT present in DOM after dashboard fully loads with sample data — the underlying HistoryChart/BenchmarkCard either don't render or are missing these testids.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "HistoryChart / BenchmarkCard", "issue": "data-testid='history-chart-card' and data-testid='benchmark-card' are not found in the rendered DOM on /dashboard after sample data load (full document.querySelectorAll scan returned null). Visual screenshot shows KPI cards + RevenueChart + Inventario summary + Recomendaciones IA + Simulador, but HistoryChart area chart and BenchmarkCard industry comparison are NOT visible.", "selector": "[data-testid='history-chart-card'], [data-testid='benchmark-card']", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Dashboard initial paint", "issues": ["Recharts ResponsiveContainer logs 'width(-1) and height(-1) of chart should be greater than 0' warnings on first frame before container measures. Cosmetic console noise — does not crash; charts render correctly after measurement."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/backend_test.py", "/app/test_reports/pytest/pytest_results.xml"],
+  "action_items": [
+    "Verify HistoryChart.jsx and BenchmarkCard.jsx are imported and rendered in Dashboard.jsx, AND that the wrapping Card has data-testid='history-chart-card' / 'benchmark-card' on the OUTER element (not inside conditional render that might be hidden when snapshots/benchmark data is empty). Check that GET /api/snapshots and GET /api/benchmarks/{type} are called and the response is non-empty for the test user (sample seed loads 5+ historical snapshots, so they SHOULD be present).",
+    "Optional: silence Recharts width(-1) height(-1) warning by ensuring ResponsiveContainer wrapper has explicit min-height / aspect-ratio."
+  ],
+  "critical_code_review_comments": [
+    "server.py: /api/business/calculate remains unauthenticated (carry-over from iter 1, intentional per onboarding preview).",
+    "server.py: snapshot-period uses datetime.utcnow().strftime('%Y-%m') — relying on UTC month boundary; could surprise users in some timezones (minor).",
+    "server.py: GEMINI_API_KEY committed in /app/backend/.env — should be rotated/moved out of source control."
+  ],
+  "updated_files": ["/app/backend/tests/backend_test.py"],
+  "success_rate": {"backend": "100% (31/31)", "frontend": "~92% (all flows pass except missing history-chart-card/benchmark-card testids on dashboard)"},
+  "test_credentials": "Backend pytest fixture auto-creates session in MongoDB. Frontend session token used: test_session_fe_1777164983958 (user FE Test User, user_id test-user-fe-1777164983958). Cookie domain smart-finance-418.preview.emergentagent.com, secure, sameSite=None.",
+  "seed_data_creation": "Sample seed via POST /api/business/sample loaded business + 5 inventory items (Café americano, Latte, Pan dulce, Sándwich club, Postre del día) + 5 historical snapshots + current-month snapshot. TEST_-prefixed records cleaned up by pytest teardown.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend pytest at /app/backend/tests/backend_test.py now covers: auth(4), business(4), status logic(3), simulator(1), AI(1), logout(1), inventory(5 incl. 401/404/CRUD-with-GET-verify), snapshots(3), benchmarks(9 incl. unknown fallback). Run with: pytest /app/backend/tests/backend_test.py -v. For frontend auth-gated UI: create MongoDB session per /app/auth_testing.md, set cookie BEFORE navigating. Critical NEW data-testids (verified present): nav-dashboard, nav-inventory, nav-business, add-inventory-btn, inventory-search, inv-name/sku/category/stock/reorder/cost/price, inv-save-btn, edit-{id}/delete-{id}, confirm-delete-btn, sum-count/units/value/low, inventory-item-dialog, export-pdf-btn, goto-inventory-btn, empty-load-sample-btn, empty-add-data-btn. NOT found in DOM: history-chart-card, benchmark-card.",
+  "rca of the issue": "Original DOM removeChild/insertBefore errors are FIXED. Verified by clicking preset-price-up/cost-down/qty-up rapidly (12 clicks total) then run-simulation-btn, plus full edit-business->dashboard navigation cycle: 0 DOM errors. The fix (isAnimationActive=false on Recharts components, useMemo on chart data, stable key on ResponsiveContainer, notranslate divs, React.memo on chart components) holds. NEW issue is unrelated: history-chart-card and benchmark-card data-testids missing from rendered Dashboard — main agent should verify Dashboard.jsx imports these components and that the OUTER wrapper has the data-testid (not gated behind a conditional that is false when snapshots/benchmark response is empty)."
+}

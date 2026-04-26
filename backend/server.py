@@ -1,6 +1,7 @@
 """
 Econo Smart - Backend FastAPI
 Sistema inteligente para PyMEs: KPIs financieros + Recomendaciones IA (Gemini)
++ Inventario + Histórico + Benchmarks de industria
 """
 import os
 import uuid
@@ -35,6 +36,21 @@ logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+
+# ============== INDUSTRY BENCHMARKS ==============
+# Promedios típicos de la industria en LATAM (referenciales).
+INDUSTRY_BENCHMARKS = {
+    "tienda":      {"margin": 0.15, "label": "Tienda / Retail",          "inv_turnover": 6.0},
+    "restaurante": {"margin": 0.12, "label": "Restaurante / Cafetería",  "inv_turnover": 12.0},
+    "servicios":   {"margin": 0.30, "label": "Servicios profesionales",  "inv_turnover": 0.0},
+    "manufactura": {"margin": 0.18, "label": "Manufactura / Taller",     "inv_turnover": 4.0},
+    "ecommerce":   {"margin": 0.20, "label": "E-commerce / Online",      "inv_turnover": 8.0},
+    "salud":       {"margin": 0.25, "label": "Salud / Belleza",          "inv_turnover": 3.0},
+    "educacion":   {"margin": 0.35, "label": "Educación / Cursos",       "inv_turnover": 0.0},
+    "otro":        {"margin": 0.20, "label": "Otro",                     "inv_turnover": 5.0},
+}
+
+
 # ============== MODELS ==============
 
 class User(BaseModel):
@@ -44,21 +60,6 @@ class User(BaseModel):
     name: str
     picture: Optional[str] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-
-
-class BusinessData(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    business_id: str = Field(default_factory=lambda: f"biz_{uuid.uuid4().hex[:12]}")
-    user_id: str
-    business_name: str
-    business_type: str  # tienda, restaurante, servicios, manufactura, ecommerce, salud
-    monthly_sales: float
-    fixed_costs: float
-    cost_per_unit: float
-    sale_price: float
-    quantity_sold: int
-    inventory: int
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class BusinessDataInput(BaseModel):
@@ -73,10 +74,20 @@ class BusinessDataInput(BaseModel):
 
 
 class SimulationInput(BaseModel):
-    price_change_pct: float = 0     # ej. 10 = +10%
-    cost_change_pct: float = 0      # ej. -5 = -5%
+    price_change_pct: float = 0
+    cost_change_pct: float = 0
     quantity_change_pct: float = 0
     fixed_cost_change_pct: float = 0
+
+
+class InventoryItemInput(BaseModel):
+    name: str
+    sku: Optional[str] = ""
+    category: Optional[str] = ""
+    stock: int = 0
+    reorder_level: int = 0
+    cost: float = 0
+    price: float = 0
 
 
 # ============== AUTH HELPERS ==============
@@ -86,11 +97,9 @@ async def get_current_user(
     session_token: Optional[str] = Cookie(None),
     authorization: Optional[str] = Header(None)
 ) -> User:
-    """Get authenticated user from cookie or Authorization header."""
     token = session_token
     if not token and authorization and authorization.startswith("Bearer "):
         token = authorization.replace("Bearer ", "").strip()
-
     if not token:
         raise HTTPException(status_code=401, detail="No session token")
 
@@ -119,13 +128,11 @@ async def get_current_user(
 
 @api_router.post("/auth/session")
 async def auth_session(request: Request, response: Response):
-    """Process session_id from Emergent Auth and create our session."""
     body = await request.json()
     session_id = body.get("session_id")
     if not session_id:
         raise HTTPException(status_code=400, detail="Missing session_id")
 
-    # Call Emergent Auth to get user data
     try:
         r = requests.get(
             "https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data",
@@ -144,7 +151,6 @@ async def auth_session(request: Request, response: Response):
     picture = data.get("picture")
     session_token = data["session_token"]
 
-    # Upsert user
     existing = await db.users.find_one({"email": email}, {"_id": 0})
     if existing:
         user_id = existing["user_id"]
@@ -162,7 +168,6 @@ async def auth_session(request: Request, response: Response):
             "created_at": datetime.now(timezone.utc).isoformat()
         })
 
-    # Save session (7 days)
     expires_at = datetime.now(timezone.utc) + timedelta(days=7)
     await db.user_sessions.insert_one({
         "user_id": user_id,
@@ -171,15 +176,10 @@ async def auth_session(request: Request, response: Response):
         "created_at": datetime.now(timezone.utc).isoformat()
     })
 
-    # Set httpOnly cookie
     response.set_cookie(
-        key="session_token",
-        value=session_token,
-        max_age=7 * 24 * 60 * 60,
-        path="/",
-        httponly=True,
-        secure=True,
-        samesite="none"
+        key="session_token", value=session_token,
+        max_age=7 * 24 * 60 * 60, path="/",
+        httponly=True, secure=True, samesite="none"
     )
 
     return {"user_id": user_id, "email": email, "name": name, "picture": picture}
@@ -190,12 +190,8 @@ async def auth_me(request: Request,
                   session_token: Optional[str] = Cookie(None),
                   authorization: Optional[str] = Header(None)):
     user = await get_current_user(request, session_token, authorization)
-    return {
-        "user_id": user.user_id,
-        "email": user.email,
-        "name": user.name,
-        "picture": user.picture
-    }
+    return {"user_id": user.user_id, "email": user.email,
+            "name": user.name, "picture": user.picture}
 
 
 @api_router.post("/auth/logout")
@@ -214,7 +210,6 @@ async def auth_logout(response: Response,
 # ============== CALCULATIONS ==============
 
 def compute_kpis(d: dict) -> dict:
-    """Calcula los KPIs financieros base."""
     price = float(d.get("sale_price", 0))
     cost = float(d.get("cost_per_unit", 0))
     qty = int(d.get("quantity_sold", 0))
@@ -232,18 +227,13 @@ def compute_kpis(d: dict) -> dict:
     inventory_turnover_ratio = (qty / inventory) if inventory > 0 else None
     inventory_high = (inventory > qty * 1.5) if qty > 0 else False
 
-    # Health status
     if profit < 0:
-        status = "loss"  # rojo
-        status_label = "En pérdidas"
+        status, status_label = "loss", "En pérdidas"
     elif margin < 0.20:
-        status = "risk"  # amarillo
-        status_label = "En riesgo"
+        status, status_label = "risk", "En riesgo"
     else:
-        status = "healthy"  # verde
-        status_label = "Saludable"
+        status, status_label = "healthy", "Saludable"
 
-    # Quick rule-based hints
     rule_hints = []
     if profit < 0:
         rule_hints.append("Tu negocio está en pérdida, reduce gastos urgentemente.")
@@ -272,14 +262,30 @@ def compute_kpis(d: dict) -> dict:
     }
 
 
-# ============== BUSINESS DATA ROUTES ==============
+def _take_snapshot(business: dict, kpis: dict) -> dict:
+    """Crea/actualiza un snapshot mensual (key = year-month)."""
+    period = datetime.now(timezone.utc).strftime("%Y-%m")
+    return {
+        "snapshot_id": f"snap_{business['user_id']}_{period}",
+        "user_id": business["user_id"],
+        "period": period,
+        "revenue": kpis["revenue"],
+        "profit": kpis["profit"],
+        "margin": kpis["margin"],
+        "total_costs": kpis["total_costs"],
+        "breakeven_units": kpis["breakeven_units"],
+        "status": kpis["status"],
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+# ============== BUSINESS ROUTES ==============
 
 @api_router.post("/business")
 async def save_business(input: BusinessDataInput, request: Request,
                         session_token: Optional[str] = Cookie(None),
                         authorization: Optional[str] = Header(None)):
     user = await get_current_user(request, session_token, authorization)
-
     existing = await db.businesses.find_one({"user_id": user.user_id}, {"_id": 0})
     now_iso = datetime.now(timezone.utc).isoformat()
 
@@ -298,6 +304,15 @@ async def save_business(input: BusinessDataInput, request: Request,
         await db.businesses.insert_one(biz.copy())
 
     biz["kpis"] = compute_kpis(biz)
+
+    # Crea/actualiza snapshot del periodo actual
+    snap = _take_snapshot(biz, biz["kpis"])
+    await db.snapshots.update_one(
+        {"snapshot_id": snap["snapshot_id"]},
+        {"$set": snap},
+        upsert=True
+    )
+
     return biz
 
 
@@ -315,7 +330,6 @@ async def get_business(request: Request,
 
 @api_router.post("/business/calculate")
 async def calculate_only(input: BusinessDataInput):
-    """Calcula KPIs sin guardar (preview en formulario)."""
     return compute_kpis(input.model_dump())
 
 
@@ -323,7 +337,6 @@ async def calculate_only(input: BusinessDataInput):
 async def simulate(sim: SimulationInput, request: Request,
                    session_token: Optional[str] = Cookie(None),
                    authorization: Optional[str] = Header(None)):
-    """Simula cambios sobre el negocio guardado."""
     user = await get_current_user(request, session_token, authorization)
     biz = await db.businesses.find_one({"user_id": user.user_id}, {"_id": 0})
     if not biz:
@@ -336,7 +349,6 @@ async def simulate(sim: SimulationInput, request: Request,
         "quantity_sold": int(biz["quantity_sold"] * (1 + sim.quantity_change_pct / 100)),
         "fixed_costs": biz["fixed_costs"] * (1 + sim.fixed_cost_change_pct / 100),
     }
-
     return {
         "current": compute_kpis(biz),
         "simulated": compute_kpis(sim_data),
@@ -344,7 +356,7 @@ async def simulate(sim: SimulationInput, request: Request,
     }
 
 
-# ============== AI ANALYSIS (Gemini) ==============
+# ============== AI ANALYSIS ==============
 
 def _format_currency(v: float) -> str:
     try:
@@ -357,7 +369,6 @@ def _format_currency(v: float) -> str:
 async def ai_analyze(request: Request,
                      session_token: Optional[str] = Cookie(None),
                      authorization: Optional[str] = Header(None)):
-    """Genera análisis y recomendaciones IA usando Gemini."""
     user = await get_current_user(request, session_token, authorization)
     biz = await db.businesses.find_one({"user_id": user.user_id}, {"_id": 0})
     if not biz:
@@ -366,13 +377,11 @@ async def ai_analyze(request: Request,
     kpis = compute_kpis(biz)
 
     if not GEMINI_API_KEY:
-        # Fallback rule-based si no hay clave
         return {
             "summary": "Análisis basado en reglas (sin IA configurada).",
             "recommendations": [{"title": "Recomendación", "detail": h, "priority": "media"}
                                 for h in kpis["rule_hints"]],
-            "kpis": kpis,
-            "ai": False,
+            "kpis": kpis, "ai": False,
         }
 
     system_message = (
@@ -423,10 +432,8 @@ Genera el análisis en JSON exacto."""
             session_id=f"analyze_{user.user_id}_{uuid.uuid4().hex[:6]}",
             system_message=system_message,
         ).with_model("gemini", "gemini-2.5-flash")
-
         response = await chat.send_message(UserMessage(text=prompt))
         text = response.strip()
-        # Limpia bloques de código si los hubiera
         if text.startswith("```"):
             text = text.strip("`")
             if text.startswith("json"):
@@ -438,14 +445,10 @@ Genera el análisis en JSON exacto."""
         logger.error(f"Gemini error: {e}")
         return {
             "summary": "No fue posible obtener análisis IA. Mostramos recomendaciones basadas en reglas.",
-            "strengths": [],
-            "risks": [],
+            "strengths": [], "risks": [],
             "recommendations": [{"title": "Recomendación", "detail": h, "priority": "media",
                                  "impact": ""} for h in kpis["rule_hints"]],
-            "next_30_days": [],
-            "kpis": kpis,
-            "ai": False,
-            "error": str(e),
+            "next_30_days": [], "kpis": kpis, "ai": False, "error": str(e),
         }
 
     parsed["kpis"] = kpis
@@ -453,7 +456,7 @@ Genera el análisis en JSON exacto."""
     return parsed
 
 
-# ============== SAMPLE DATA ==============
+# ============== SAMPLE / SEED ==============
 
 SAMPLE_BUSINESS = {
     "business_name": "Cafetería La Esquina",
@@ -466,11 +469,19 @@ SAMPLE_BUSINESS = {
     "inventory": 400,
 }
 
+SAMPLE_INVENTORY = [
+    {"name": "Café americano", "sku": "CAF-AME", "category": "Bebidas", "stock": 80, "reorder_level": 30, "cost": 12, "price": 35},
+    {"name": "Latte", "sku": "CAF-LAT", "category": "Bebidas", "stock": 60, "reorder_level": 25, "cost": 18, "price": 50},
+    {"name": "Pan dulce", "sku": "PAN-DUL", "category": "Panadería", "stock": 45, "reorder_level": 20, "cost": 8, "price": 25},
+    {"name": "Sándwich club", "sku": "SAN-CLU", "category": "Comida", "stock": 18, "reorder_level": 15, "cost": 35, "price": 85},
+    {"name": "Postre del día", "sku": "POS-DIA", "category": "Postres", "stock": 12, "reorder_level": 15, "cost": 22, "price": 55},
+]
+
+
 @api_router.post("/business/sample")
 async def load_sample(request: Request,
                       session_token: Optional[str] = Cookie(None),
                       authorization: Optional[str] = Header(None)):
-    """Carga datos de ejemplo para el usuario."""
     user = await get_current_user(request, session_token, authorization)
     now_iso = datetime.now(timezone.utc).isoformat()
 
@@ -490,7 +501,143 @@ async def load_sample(request: Request,
 
     biz = await db.businesses.find_one({"user_id": user.user_id}, {"_id": 0})
     biz["kpis"] = compute_kpis(biz)
+
+    # Snapshot
+    snap = _take_snapshot(biz, biz["kpis"])
+    await db.snapshots.update_one(
+        {"snapshot_id": snap["snapshot_id"]},
+        {"$set": snap},
+        upsert=True
+    )
+
+    # Cargar inventario de ejemplo solo si no tiene
+    has_items = await db.inventory.count_documents({"user_id": user.user_id})
+    if not has_items:
+        for item in SAMPLE_INVENTORY:
+            await db.inventory.insert_one({
+                "item_id": f"item_{uuid.uuid4().hex[:12]}",
+                "user_id": user.user_id,
+                **item,
+                "updated_at": now_iso,
+            })
+
+    # Snapshots ficticios de meses pasados (demo)
+    has_snaps = await db.snapshots.count_documents({"user_id": user.user_id})
+    if has_snaps < 3:
+        base = datetime.now(timezone.utc)
+        for i in range(1, 6):
+            d = base - timedelta(days=30 * i)
+            period = d.strftime("%Y-%m")
+            factor = 0.85 + 0.04 * (5 - i)
+            r = round(biz["kpis"]["revenue"] * factor, 2)
+            p = round(biz["kpis"]["profit"] * factor * (0.6 + 0.08 * (5 - i)), 2)
+            await db.snapshots.update_one(
+                {"snapshot_id": f"snap_{user.user_id}_{period}"},
+                {"$set": {
+                    "snapshot_id": f"snap_{user.user_id}_{period}",
+                    "user_id": user.user_id,
+                    "period": period,
+                    "revenue": r,
+                    "profit": p,
+                    "margin": round(p / r, 4) if r else 0,
+                    "total_costs": round(r - p, 2),
+                    "breakeven_units": biz["kpis"]["breakeven_units"],
+                    "status": "healthy" if p > 0 and (p / r if r else 0) >= 0.20 else "risk",
+                    "created_at": d.isoformat(),
+                }},
+                upsert=True
+            )
     return biz
+
+
+# ============== INVENTORY ==============
+
+@api_router.get("/inventory")
+async def list_inventory(request: Request,
+                         session_token: Optional[str] = Cookie(None),
+                         authorization: Optional[str] = Header(None)):
+    user = await get_current_user(request, session_token, authorization)
+    items = await db.inventory.find({"user_id": user.user_id}, {"_id": 0}).sort("name", 1).to_list(500)
+    total_units = sum(int(i.get("stock", 0)) for i in items)
+    total_value_cost = sum(int(i.get("stock", 0)) * float(i.get("cost", 0)) for i in items)
+    total_value_price = sum(int(i.get("stock", 0)) * float(i.get("price", 0)) for i in items)
+    low_stock = [i for i in items if int(i.get("stock", 0)) <= int(i.get("reorder_level", 0))]
+    return {
+        "items": items,
+        "summary": {
+            "count": len(items),
+            "total_units": total_units,
+            "total_cost_value": round(total_value_cost, 2),
+            "total_retail_value": round(total_value_price, 2),
+            "potential_margin": round(total_value_price - total_value_cost, 2),
+            "low_stock_count": len(low_stock),
+            "low_stock_items": [i["name"] for i in low_stock],
+        },
+    }
+
+
+@api_router.post("/inventory")
+async def create_inventory_item(input: InventoryItemInput, request: Request,
+                                session_token: Optional[str] = Cookie(None),
+                                authorization: Optional[str] = Header(None)):
+    user = await get_current_user(request, session_token, authorization)
+    item = {
+        "item_id": f"item_{uuid.uuid4().hex[:12]}",
+        "user_id": user.user_id,
+        **input.model_dump(),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.inventory.insert_one(item.copy())
+    return item
+
+
+@api_router.put("/inventory/{item_id}")
+async def update_inventory_item(item_id: str, input: InventoryItemInput, request: Request,
+                                session_token: Optional[str] = Cookie(None),
+                                authorization: Optional[str] = Header(None)):
+    user = await get_current_user(request, session_token, authorization)
+    update_doc = input.model_dump()
+    update_doc["updated_at"] = datetime.now(timezone.utc).isoformat()
+    res = await db.inventory.update_one(
+        {"item_id": item_id, "user_id": user.user_id},
+        {"$set": update_doc}
+    )
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Item not found")
+    item = await db.inventory.find_one({"item_id": item_id}, {"_id": 0})
+    return item
+
+
+@api_router.delete("/inventory/{item_id}")
+async def delete_inventory_item(item_id: str, request: Request,
+                                session_token: Optional[str] = Cookie(None),
+                                authorization: Optional[str] = Header(None)):
+    user = await get_current_user(request, session_token, authorization)
+    res = await db.inventory.delete_one({"item_id": item_id, "user_id": user.user_id})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Item not found")
+    return {"ok": True}
+
+
+# ============== HISTORY / SNAPSHOTS ==============
+
+@api_router.get("/snapshots")
+async def get_snapshots(request: Request,
+                        session_token: Optional[str] = Cookie(None),
+                        authorization: Optional[str] = Header(None)):
+    user = await get_current_user(request, session_token, authorization)
+    snaps = await db.snapshots.find(
+        {"user_id": user.user_id}, {"_id": 0}
+    ).sort("period", 1).to_list(60)
+    return {"snapshots": snaps}
+
+
+# ============== BENCHMARKS ==============
+
+@api_router.get("/benchmarks/{business_type}")
+async def get_benchmark(business_type: str):
+    bench = INDUSTRY_BENCHMARKS.get(business_type, INDUSTRY_BENCHMARKS["otro"])
+    return {"business_type": business_type, **bench}
 
 
 @api_router.get("/")
@@ -498,7 +645,6 @@ async def root():
     return {"message": "Econo Smart API", "status": "ok"}
 
 
-# Include router
 app.include_router(api_router)
 
 app.add_middleware(

@@ -7,8 +7,11 @@ import AppShell from "@/components/business/AppShell";
 import KpiCard from "@/components/business/KpiCard";
 import HealthIndicator from "@/components/business/HealthIndicator";
 import RevenueChart from "@/components/business/RevenueChart";
+import HistoryChart from "@/components/business/HistoryChart";
+import BenchmarkCard from "@/components/business/BenchmarkCard";
 import Recommendations from "@/components/business/Recommendations";
 import Simulator from "@/components/business/Simulator";
+import PdfExportButton from "@/components/business/PdfExportButton";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { toast } from "sonner";
@@ -62,6 +65,7 @@ const Dashboard = () => {
   const { user } = useAuth();
   const [biz, setBiz] = useState(null);
   const [analysis, setAnalysis] = useState(null);
+  const [snapshots, setSnapshots] = useState([]);
   const [loading, setLoading] = useState(true);
   const [aiLoading, setAiLoading] = useState(false);
   const [loadingSample, setLoadingSample] = useState(false);
@@ -73,6 +77,15 @@ const Dashboard = () => {
       return data.business;
     } catch (e) {
       return null;
+    }
+  }, []);
+
+  const fetchSnapshots = useCallback(async () => {
+    try {
+      const { data } = await api.get("/snapshots");
+      setSnapshots(data.snapshots || []);
+    } catch (e) {
+      // ignore
     }
   }, []);
 
@@ -92,11 +105,13 @@ const Dashboard = () => {
     let mounted = true;
     (async () => {
       const b = await fetchBiz();
-      if (mounted && b) await fetchAi();
+      if (mounted && b) {
+        await Promise.all([fetchAi(), fetchSnapshots()]);
+      }
       if (mounted) setLoading(false);
     })();
     return () => { mounted = false; };
-  }, [fetchBiz, fetchAi]);
+  }, [fetchBiz, fetchAi, fetchSnapshots]);
 
   const handleLoadSample = async () => {
     setLoadingSample(true);
@@ -104,7 +119,7 @@ const Dashboard = () => {
       const { data } = await api.post("/business/sample");
       setBiz(data);
       toast.success("Datos de ejemplo cargados.");
-      await fetchAi();
+      await Promise.all([fetchAi(), fetchSnapshots()]);
     } catch (e) {
       toast.error("No se pudieron cargar los datos de ejemplo.");
     } finally {
@@ -139,23 +154,26 @@ const Dashboard = () => {
   return (
     <AppShell
       action={
-        <Button
-          data-testid="header-edit-data-btn"
-          onClick={() => navigate("/onboarding")}
-          variant="outline"
-          className="border-emerald-200 hover:bg-emerald-50 hover:text-emerald-800 hidden sm:inline-flex"
-        >
-          <Plus className="h-4 w-4 mr-1.5" />
-          Editar datos
-        </Button>
+        <div className="flex items-center gap-2">
+          <PdfExportButton targetId="dashboard-export-target" filename={`econo-smart-${biz.business_name}.pdf`} />
+          <Button
+            data-testid="header-edit-data-btn"
+            onClick={() => navigate("/onboarding")}
+            variant="outline"
+            className="border-emerald-200 hover:bg-emerald-50 hover:text-emerald-800 hidden sm:inline-flex"
+          >
+            <Plus className="h-4 w-4 mr-1.5" />
+            Editar datos
+          </Button>
+        </div>
       }
     >
-      <div className="space-y-6 animate-fade-in-up">
+      <div id="dashboard-export-target" className="space-y-6 animate-fade-in-up">
         {/* Header */}
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <p className="text-emerald-700 font-display font-semibold text-sm">
-              Hola, {user?.name?.split(" ")[0] || "emprendedor"} 👋
+              Hola, {user?.name?.split(" ")[0] || "emprendedor"}
             </p>
             <h1 data-testid="business-name-heading" className="mt-1 font-display font-bold text-3xl sm:text-4xl text-charcoal text-balance">
               {biz.business_name}
@@ -242,14 +260,32 @@ const Dashboard = () => {
                   helper={k.contribution_margin_per_unit > 0 ? "ganancia bruta/unidad" : "pérdida por unidad"}
                 />
               </div>
+              <Button
+                data-testid="goto-inventory-btn"
+                size="sm"
+                onClick={() => navigate("/inventario")}
+                variant="outline"
+                className="w-full mt-4 border-emerald-200 hover:bg-emerald-50 hover:text-emerald-800"
+              >
+                <Boxes className="h-4 w-4 mr-2" />
+                Administrar productos
+              </Button>
               {k.inventory_high && (
-                <div className="mt-4 rounded-xl bg-amber-50 border border-amber-100 p-3 text-amber-800 text-xs flex gap-2 items-start">
+                <div className="mt-3 rounded-xl bg-amber-50 border border-amber-100 p-3 text-amber-800 text-xs flex gap-2 items-start">
                   <BarChart3 className="h-4 w-4 mt-0.5 shrink-0" />
                   <span>Tu inventario es alto vs. ventas. Considera promociones o reducir compras.</span>
                 </div>
               )}
             </CardContent>
           </Card>
+        </div>
+
+        {/* History + Benchmark */}
+        <div className="grid lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-2">
+            <HistoryChart snapshots={snapshots} />
+          </div>
+          <BenchmarkCard businessType={biz.business_type} userMargin={k.margin} />
         </div>
 
         {/* AI Recommendations */}

@@ -1,8 +1,7 @@
 import React from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate, Link, useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -11,7 +10,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { TrendingUp, LogOut, Settings, FileSpreadsheet } from "lucide-react";
+import { TrendingUp, LogOut, Settings, FileSpreadsheet, BarChart3, Boxes } from "lucide-react";
 
 const initials = (name) =>
   (name || "")
@@ -22,28 +21,56 @@ const initials = (name) =>
     .join("")
     .toUpperCase() || "U";
 
+const NavLink = ({ to, icon: Icon, label, active, testId }) => (
+  <Link
+    to={to}
+    data-testid={testId}
+    className={`flex items-center gap-2 px-3 h-9 rounded-lg text-sm font-display font-semibold transition-colors ${
+      active
+        ? "bg-emerald-50 text-emerald-800"
+        : "text-charcoal/65 hover:text-emerald-800 hover:bg-emerald-50"
+    }`}
+  >
+    <Icon className="h-4 w-4" strokeWidth={2.2} />
+    <span className="hidden lg:inline">{label}</span>
+  </Link>
+);
+
 const AppShell = ({ children, action }) => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const handleLogout = async () => {
     await logout();
     navigate("/login", { replace: true });
   };
 
+  const isDashboard = location.pathname.startsWith("/dashboard");
+  const isInventory = location.pathname.startsWith("/inventario");
+  const isOnboarding = location.pathname.startsWith("/onboarding");
+
   return (
     <div className="min-h-screen bg-mint-glow">
       <header className="sticky top-0 z-30 bg-white/80 backdrop-blur-md border-b border-emerald-100">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          <Link to="/dashboard" className="flex items-center gap-2.5">
-            <div className="h-9 w-9 rounded-xl bg-emerald-600 grid place-items-center text-white">
-              <TrendingUp className="h-5 w-5" strokeWidth={2.4} />
-            </div>
-            <div className="leading-none">
-              <p className="font-display font-bold text-lg text-charcoal">Econo Smart</p>
-              <p className="text-[10px] uppercase tracking-wider text-emerald-700/70">PyME Insights</p>
-            </div>
-          </Link>
+          <div className="flex items-center gap-6">
+            <Link to="/dashboard" className="flex items-center gap-2.5">
+              <div className="h-9 w-9 rounded-xl bg-emerald-600 grid place-items-center text-white">
+                <TrendingUp className="h-5 w-5" strokeWidth={2.4} />
+              </div>
+              <div className="leading-none">
+                <p className="font-display font-bold text-lg text-charcoal">Econo Smart</p>
+                <p className="text-[10px] uppercase tracking-wider text-emerald-700/70">PyME Insights</p>
+              </div>
+            </Link>
+
+            <nav className="hidden sm:flex items-center gap-1">
+              <NavLink testId="nav-dashboard" to="/dashboard" icon={BarChart3} label="Dashboard" active={isDashboard} />
+              <NavLink testId="nav-inventory" to="/inventario" icon={Boxes} label="Inventario" active={isInventory} />
+              <NavLink testId="nav-business" to="/onboarding" icon={FileSpreadsheet} label="Mi negocio" active={isOnboarding} />
+            </nav>
+          </div>
 
           <div className="flex items-center gap-3">
             {action}
@@ -69,6 +96,12 @@ const AppShell = ({ children, action }) => {
                   </div>
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => navigate("/dashboard")}>
+                  <BarChart3 className="h-4 w-4 mr-2" /> Dashboard
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => navigate("/inventario")}>
+                  <Boxes className="h-4 w-4 mr-2" /> Inventario
+                </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => navigate("/onboarding")} data-testid="menu-edit-business">
                   <FileSpreadsheet className="h-4 w-4 mr-2" /> Editar mi negocio
                 </DropdownMenuItem>
@@ -82,6 +115,15 @@ const AppShell = ({ children, action }) => {
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
+        </div>
+
+        {/* Mobile nav */}
+        <div className="sm:hidden border-t border-emerald-50 bg-white/60">
+          <nav className="max-w-7xl mx-auto px-4 h-11 flex items-center gap-1 overflow-x-auto">
+            <NavLink to="/dashboard" icon={BarChart3} label="Dashboard" active={isDashboard} />
+            <NavLink to="/inventario" icon={Boxes} label="Inventario" active={isInventory} />
+            <NavLink to="/onboarding" icon={FileSpreadsheet} label="Mi negocio" active={isOnboarding} />
+          </nav>
         </div>
       </header>
 
