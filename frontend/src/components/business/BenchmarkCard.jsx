@@ -17,7 +17,23 @@ const BenchmarkCard = ({ businessType, userMargin }) => {
     return () => { mounted = false; };
   }, [businessType]);
 
-  if (!bench) return null;
+  if (!bench) {
+    return (
+      <Card data-testid="benchmark-card" className="border-emerald-100">
+        <CardContent className="p-5">
+          <div className="flex items-center gap-3">
+            <div className="h-10 w-10 rounded-xl bg-info-50 text-info border border-info-100 grid place-items-center">
+              <Building2 className="h-5 w-5" strokeWidth={2.2} />
+            </div>
+            <div>
+              <p className="font-display font-bold text-charcoal">Comparativo de industria</p>
+              <p className="text-charcoal/55 text-xs">Cargando benchmark…</p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
 
   const diff = (userMargin || 0) - bench.margin;
   const ahead = diff >= 0;

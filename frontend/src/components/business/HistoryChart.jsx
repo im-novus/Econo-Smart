@@ -35,7 +35,28 @@ const HistoryChart = ({ snapshots }) => {
       }));
   }, [snapshots]);
 
-  if (!data.length) return null;
+  if (!data.length) {
+    return (
+      <Card data-testid="history-chart-card" className="border-emerald-100">
+        <CardHeader className="pb-2">
+          <div className="flex items-center gap-3">
+            <div className="h-10 w-10 rounded-xl bg-info-50 text-info border border-info-100 grid place-items-center">
+              <Activity className="h-5 w-5" strokeWidth={2.2} />
+            </div>
+            <div>
+              <CardTitle className="font-display text-charcoal">Histórico mensual</CardTitle>
+              <p className="text-charcoal/55 text-sm mt-0.5">Aún sin datos históricos</p>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div className="h-48 grid place-items-center text-charcoal/55 text-sm">
+            Tu histórico aparecerá aquí cuando tengas más de un mes de datos.
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
 
   const stableKey = data.map((d) => d.period).join("|");
 
