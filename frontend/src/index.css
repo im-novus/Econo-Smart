@@ -1,0 +1,161 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Manrope:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Econo Smart Light Theme */
+    --background: 150 45% 98%;
+    --foreground: 60 4% 17%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 60 4% 17%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 60 4% 17%;
+
+    --primary: 161 70% 36%;            /* #1D9E75 */
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 161 47% 92%;          /* mint */
+    --secondary-foreground: 162 78% 24%; /* deep emerald */
+
+    --muted: 150 30% 96%;
+    --muted-foreground: 60 4% 40%;
+
+    --accent: 161 47% 92%;
+    --accent-foreground: 162 78% 24%;
+
+    --destructive: 0 65% 55%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 150 20% 88%;
+    --input: 150 20% 88%;
+    --ring: 161 70% 36%;
+
+    --chart-1: 161 70% 36%;   /* emerald */
+    --chart-2: 33 86% 55%;    /* amber */
+    --chart-3: 209 64% 45%;   /* info blue */
+    --chart-4: 162 78% 24%;   /* dark emerald */
+    --chart-5: 0 65% 55%;     /* danger */
+
+    --radius: 0.75rem;
+  }
+
+  .dark {
+    --background: 162 30% 8%;
+    --foreground: 150 20% 95%;
+    --card: 162 25% 12%;
+    --card-foreground: 150 20% 95%;
+    --popover: 162 25% 12%;
+    --popover-foreground: 150 20% 95%;
+    --primary: 161 70% 50%;
+    --primary-foreground: 162 78% 10%;
+    --secondary: 162 20% 18%;
+    --secondary-foreground: 150 20% 95%;
+    --muted: 162 20% 16%;
+    --muted-foreground: 150 10% 65%;
+    --accent: 162 20% 18%;
+    --accent-foreground: 150 20% 95%;
+    --destructive: 0 65% 50%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 162 20% 20%;
+    --input: 162 20% 20%;
+    --ring: 161 70% 50%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans;
+    font-feature-settings: "cv11", "ss01";
+    font-variation-settings: "opsz" 32;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-display tracking-tight;
+  }
+
+  ::selection {
+    background: #1D9E75;
+    color: #ffffff;
+  }
+}
+
+/* ===== Custom utilities ===== */
+@layer utilities {
+  .bg-grid-emerald {
+    background-image:
+      linear-gradient(rgba(29, 158, 117, 0.06) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(29, 158, 117, 0.06) 1px, transparent 1px);
+    background-size: 32px 32px;
+  }
+
+  .bg-mint-glow {
+    background:
+      radial-gradient(60% 50% at 20% 10%, rgba(29,158,117,0.10), transparent 60%),
+      radial-gradient(50% 40% at 90% 20%, rgba(239,159,39,0.08), transparent 60%),
+      #F6FBF8;
+  }
+
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  .glass-card {
+    background: rgba(255, 255, 255, 0.65);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border: 1px solid rgba(29, 158, 117, 0.12);
+  }
+
+  .ring-emerald-soft {
+    box-shadow: 0 0 0 4px rgba(29, 158, 117, 0.12);
+  }
+
+  .number-pop {
+    font-feature-settings: "tnum" 1, "ss01" 1;
+  }
+}
+
+@layer base {
+  [data-debug-wrapper="true"] {
+    display: contents !important;
+  }
+  [data-debug-wrapper="true"] > * {
+    margin-left: inherit;
+    margin-right: inherit;
+    margin-top: inherit;
+    margin-bottom: inherit;
+    padding-left: inherit;
+    padding-right: inherit;
+    padding-top: inherit;
+    padding-bottom: inherit;
+    column-gap: inherit;
+    row-gap: inherit;
+    gap: inherit;
+    border-left-width: inherit;
+    border-right-width: inherit;
+    border-top-width: inherit;
+    border-bottom-width: inherit;
+    border-left-style: inherit;
+    border-right-style: inherit;
+    border-top-style: inherit;
+    border-bottom-style: inherit;
+    border-left-color: inherit;
+    border-right-color: inherit;
+    border-top-color: inherit;
+    border-bottom-color: inherit;
+  }
+}
