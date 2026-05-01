@@ -640,6 +640,37 @@ async def get_benchmark(business_type: str):
     return {"business_type": business_type, **bench}
 
 
+@api_router.get("/business/report")
+async def business_report(request: Request,
+                          session_token: Optional[str] = Cookie(None),
+                          authorization: Optional[str] = Header(None)):
+    """Bundle completo para reporte PDF: negocio + KPIs + snapshots + benchmark + inventario."""
+    user = await get_current_user(request, session_token, authorization)
+    biz = await db.businesses.find_one({"user_id": user.user_id}, {"_id": 0})
+    if not biz:
+        raise HTTPException(status_code=404, detail="No business data")
+
+    kpis = compute_kpis(biz)
+    snaps = await db.snapshots.find(
+        {"user_id": user.user_id}, {"_id": 0}
+    ).sort("period", 1).to_list(60)
+    items = await db.inventory.find(
+        {"user_id": user.user_id}, {"_id": 0}
+    ).sort("name", 1).to_list(500)
+    bench = INDUSTRY_BENCHMARKS.get(biz.get("business_type", "otro"),
+                                    INDUSTRY_BENCHMARKS["otro"])
+
+    return {
+        "user": {"name": user.name, "email": user.email},
+        "business": biz,
+        "kpis": kpis,
+        "snapshots": snaps,
+        "inventory": items,
+        "benchmark": {"business_type": biz.get("business_type", "otro"), **bench},
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 @api_router.get("/")
 async def root():
     return {"message": "Econo Smart API", "status": "ok"}
